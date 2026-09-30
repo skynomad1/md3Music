@@ -1,36 +1,58 @@
+# 工作流的名称，会显示在 GitHub Actions 页面左侧
 name: Build Windows Portable
 
+# 触发条件：workflow_dispatch 表示允许你在网页上手动点击按钮运行
 on:
-  workflow_dispatch: # 允许我们在网页上手动点击运行
+  workflow_dispatch: 
 
 jobs:
   build:
-    runs-on: windows-latest # 使用微软最新的 Windows 虚拟机，自带 VS2022 和 C++ 环境
+    # 核心：向微软借用一台运行最新 Windows Server 的云端虚拟机
+    runs-on: windows-latest 
     steps:
+      # 第一步：把仓库里的代码拉取到虚拟机里
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: rust-local-force # 确保拉取正确的分支
+          # 明确指定拉取我们需要的 rust-local-force 分支
+          ref: rust-local-force 
 
+      # 第二步：在云端安装 Flutter 环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # 拉取最新的稳定版 Flutter
+          # 使用最新的稳定版 Flutter（日志显示拉取的是 3.47.5，完美符合脚本需求）
+          channel: 'stable'
 
+      # 第三步：在云端安装 Rust 环境
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc # 强制拉取 MSVC 工具链，完美匹配脚本要求
+          # 必须指定 MSVC 工具链，因为你的 windows.ps1 脚本里强制要求 *-msvc
+          targets: x86_64-pc-windows-msvc 
 
+      # 第四步：拉取项目的 Flutter 依赖包
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      - name: Run Windows Build Script
-        run: powershell -ExecutionPolicy Bypass -File .\scripts\md3.ps1 windows -NoPause
-        # 这里的 -NoPause 非常重要，不加的话脚本会在 CI 环境里一直傻等按键，直到超时报错
+      # 第五步：配置临时 Git 身份（非常重要！）
+      # 你的 windows.ps1 脚本里有一句 Test-RustDirty 会去跑 git status，
+      # 云端如果不预先配置好 Git 身份，某些情况下会直接报错退出。
+      - name: Configure Git for CI
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub CI"
 
+      # 第六步：真正开始干活！执行打包脚本
+      # ⚠️ 这里就是之前翻车的根本原因，路径已经准确指向 scripts\tasks\windows.ps1
+      # -NoPause 是为了防止脚本在结束时傻等按任意键，导致云端一直挂起直到超时报错
+      - name: Run Windows Build Script
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\tasks\windows.ps1 -NoPause
+
+      # 第七步：把打包好的 zip 压缩包捞出来，放到网页上让你下载
       - name: Upload Portable Zip
         uses: actions/upload-artifact@v4
         with:
           name: md3music-windows
-          path: build/windows/*.zip # 自动抓取构建出来的 zip 压缩包
+          # 这里对应脚本执行完后产出的 build\windows\md3music-windows-版本号.zip
+          path: build/windows/*.zip 
