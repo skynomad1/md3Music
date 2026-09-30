@@ -1,0 +1,36 @@
+name: Build Windows Portable
+
+on:
+  workflow_dispatch: # 允许我们在网页上手动点击运行
+
+jobs:
+  build:
+    runs-on: windows-latest # 使用微软最新的 Windows 虚拟机，自带 VS2022 和 C++ 环境
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: rust-local-force # 确保拉取正确的分支
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable' # 拉取最新的稳定版 Flutter
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc # 强制拉取 MSVC 工具链，完美匹配脚本要求
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Run Windows Build Script
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\md3.ps1 windows -NoPause
+        # 这里的 -NoPause 非常重要，不加的话脚本会在 CI 环境里一直傻等按键，直到超时报错
+
+      - name: Upload Portable Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: md3music-windows
+          path: build/windows/*.zip # 自动抓取构建出来的 zip 压缩包
