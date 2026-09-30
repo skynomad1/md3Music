@@ -1,7 +1,7 @@
-# 工作流的名称，会显示在 GitHub Actions 页面左侧
+# 工作流名称，会显示在 GitHub Actions 页面的左侧
 name: Build Windows Portable
 
-# 触发条件：workflow_dispatch 表示允许你在网页上手动点击按钮运行
+# 触发条件：workflow_dispatch 表示允许在 GitHub 网页上手动点击按钮运行
 on:
   workflow_dispatch: 
 
@@ -14,45 +14,52 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # 明确指定拉取我们需要的 rust-local-force 分支
+          # 明确指定拉取我们需要打包的 rust-local-force 分支
           ref: rust-local-force 
 
       # 第二步：在云端安装 Flutter 环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          # 使用最新的稳定版 Flutter（日志显示拉取的是 3.47.5，完美符合脚本需求）
+          # ⚠️ 锁定 3.47.5 版本（这是经过上次测试的稳定版，防止未来更新导致代码不兼容）
+          flutter-version: '3.47.5'
           channel: 'stable'
 
       # 第三步：在云端安装 Rust 环境
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # 必须指定 MSVC 工具链，因为你的 windows.ps1 脚本里强制要求 *-msvc
+          # 必须指定 MSVC 工具链，因为 windows.ps1 脚本里强制要求 *-msvc
           targets: x86_64-pc-windows-msvc 
 
       # 第四步：拉取项目的 Flutter 依赖包
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      # 第五步：配置临时 Git 身份（非常重要！）
-      # 你的 windows.ps1 脚本里有一句 Test-RustDirty 会去跑 git status，
-      # 云端如果不预先配置好 Git 身份，某些情况下会直接报错退出。
+      # 第五步（⭐ 关键救星）：让 Flutter 自动补全缺失的 windows 平台文件夹
+      # 因为原仓库上传时可能忽略了 windows 文件夹，没它打包会报错"未配置Windows项目"
+      - name: Generate Windows platform folder
+        run: flutter create . --platforms=windows
+
+      # 第六步：配置临时 Git 身份
+      # windows.ps1 脚本内部会运行 git status 检测代码改动，没有身份信息会直接报错退出
       - name: Configure Git for CI
         run: |
           git config --global user.email "ci@github.com"
           git config --global user.name "GitHub CI"
 
-      # 第六步：真正开始干活！执行打包脚本
-      # ⚠️ 这里就是之前翻车的根本原因，路径已经准确指向 scripts\tasks\windows.ps1
-      # -NoPause 是为了防止脚本在结束时傻等按任意键，导致云端一直挂起直到超时报错
+      # 第七步：真正开始执行打包脚本
+      # -NoPause 是为了防止脚本结束时傻等按键，导致云端一直卡住
       - name: Run Windows Build Script
         run: powershell -ExecutionPolicy Bypass -File .\scripts\tasks\windows.ps1 -NoPause
 
-      # 第七步：把打包好的 zip 压缩包捞出来，放到网页上让你下载
+      # 第八步：把打包好的 zip 压缩包捞出来放到网页上
+      # if: always() 确保即使前面步骤报错，只要有 zip 文件也会捞出来（方便排查）
       - name: Upload Portable Zip
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: md3music-windows
-          # 这里对应脚本执行完后产出的 build\windows\md3music-windows-版本号.zip
+          # 对应脚本执行完后生成的 build\windows\md3music-windows-版本号.zip
           path: build/windows/*.zip 
+          if-no-files-found: warn
